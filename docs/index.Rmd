@@ -22,7 +22,7 @@ library(plyr)
 library(gganimate)
 library(beepr) # beeps when script has run
 
-DIR <- "C:/Users/mdzbf/OneDrive - University of Bristol/Desktop/Poker 2025_2026"
+DIR <- "C:\Users\mdzbf\OneDrive - University of Bristol\Desktop\PokerLeague\Deep Burn Poker League 2026"
 
 # Point Structure----
 POSITION.POINTS <- data.frame(Position = seq(1, 22),
@@ -440,11 +440,15 @@ reactable(df.GAME %>%
 
 **Game 01 22/01/2026**
 
-![*Fred*](C:\Users\mdzbf\OneDrive - University of Bristol\Desktop\Poker 2025_2026\Images\Game01_Fred.jpg){width=250px}
+![*Fred*](C:/Users/mdzbf/OneDrive - University of Bristol/Desktop/PokerLeague/Deep burn Poker League 2026 - Images/Game01_Fred.jpg){width=250px}
 
 **Game 02 22/01/2026**
 
-![*Ian*](C:\Users\mdzbf\OneDrive - University of Bristol\Desktop\Poker 2025_2026\Images\Game02_Ian.jpeg){width=250px}
+![*Ian*](C:/Users/mdzbf/OneDrive - University of Bristol/Desktop/PokerLeague/Deep burn Poker League 2026 - Images/Game02_Ian.jpeg){width=250px}
+
+**Game 03 27/03/2026**
+
+![*Joe*](C:/Users/mdzbf/OneDrive - University of Bristol/Desktop/PokerLeague/Deep burn Poker League 2026 - Images/Game03_Joe.jpeg){width=250px}
 
 ```{r WillhelmScream, include=FALSE}
  beep(2)
