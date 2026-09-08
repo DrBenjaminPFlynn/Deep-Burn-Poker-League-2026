@@ -1,0 +1,451 @@
+---
+title: "Deep Burn Poker League"
+author: "Sep 2025 - Aug 2026"
+date: "The thing with card games is, there's always a chance - Joe aka Mutley"
+output: 
+  prettydoc::html_pretty:
+    theme: hpstr
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Library
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(knitr)
+library(reactable)
+library(ggpubr)
+library(ggrepel)
+library(plyr)
+library(gganimate)
+library(beepr) # beeps when script has run
+
+DIR <- "C:/Users/mdzbf/OneDrive - University of Bristol/Desktop/Poker 2025_2026"
+
+# Point Structure----
+POSITION.POINTS <- data.frame(Position = seq(1, 22),
+                              Points = c(100, 80, 70, 60, 50, 40, 35, 30, 25, 20, 20, 20, rep(10, 10)))
+
+BOUNTY.POINTS <- 5
+
+# Save default ggplot theme & set new
+OLD.GGPLOT.THEME <- theme_get()
+theme_set(theme_light())
+```
+
+```{r Per.Game.Stats, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Add game number info to df
+
+# Per Game Statistics----
+## Loop over Games to build df
+df.GAME <- data.frame(matrix(ncol = 7, nrow = 0))
+colnames(df.GAME) <- c(read.csv(paste0(DIR,
+                                       "/GitHub/Results/Game01.csv"),
+                                header = FALSE)[4,],
+                       "Game")
+
+for (GAME in list.files(paste0(DIR, "/GitHub/Results"),
+                        pattern = ".csv")) {
+  
+  df.GAME.inter <- read.csv(paste0(DIR,
+                                   "/GitHub/Results/", GAME),
+                            header = FALSE, skip = 4)
+  colnames(df.GAME.inter) <- read.csv(paste0(DIR,
+                                             "/GitHub/Results/", GAME),
+                                      header = FALSE)[4,]
+  
+  df.GAME.inter[is.na(df.GAME.inter)] <- 0
+  df.GAME.inter[["Winnings (£)"]] <- df.GAME.inter[["Winnings"]]-10 # Adjusting winnings for ante
+  df.GAME.inter[["Game"]] <- gsub("\\.csv", "", GAME)
+  
+  df.GAME <- rbind(df.GAME,
+                   df.GAME.inter)
+  rm(df.GAME.inter)
+  gc()
+  
+}
+
+## League points for position corrected for Joker, and kills----
+df.GAME[df.GAME[["Joker"]] == "Yes",][["Joker"]] <- "🃏"
+df.GAME[df.GAME[["Joker"]] == "",][["Joker"]] <- ""
+df.GAME[df.GAME[["Joker"]] == 0,][["Joker"]] <- ""
+
+df.GAME[["League.Points"]] <- ""
+df.GAME[["Kill.Points"]] <- ""
+
+for (ROW in seq(1, nrow(df.GAME))) {
+  
+  if (df.GAME[ROW, "Joker"] == "🃏") {
+    df.GAME[ROW,][["League.Points"]] <- POSITION.POINTS[POSITION.POINTS[["Position"]] == df.GAME[ROW, "Position"], "Points"]*2
+  } else {
+    df.GAME[ROW,][["League.Points"]] <- POSITION.POINTS[POSITION.POINTS[["Position"]] == df.GAME[ROW, "Position"], "Points"]
+  }
+}
+
+## Kill Points & Game Time----
+df.GAME[["Kill.Points"]] <- ""
+
+### Convert midnight hr to '24' value
+for (ROW.N in seq(1, nrow(df.GAME))) {
+  if (as.numeric(word(gsub(":", " ", df.GAME[ROW.N, "Time"]), 1)) == 0) {
+    df.GAME[["Time"]][ROW.N] <- paste0("24:", 
+                                       word(gsub(":", " ", 
+                                                 df.GAME[ROW.N, "Time"]),
+                                            2),
+                                       ":",
+                                       word(gsub(":", " ", 
+                                                 df.GAME[ROW.N, "Time"]),
+                                            3))
+  }
+}
+
+df.GAME[["Game.Time.min"]] <- ""
+
+for (GAME in unique(df.GAME[["Game"]])) {
+  
+  GAME.START.HR <- as.numeric(word(gsub(":", " ", read.csv(paste0(DIR,
+                                                                  "/GitHub/Results/", GAME, ".csv"),
+                                                           header = FALSE)[2,2]),
+                                   1))
+  GAME.START.MIN <- as.numeric(word(gsub(":", " ", read.csv(paste0(DIR,
+                                                                   "/GitHub/Results/", GAME, ".csv"),
+                                                            header = FALSE)[2,2]),
+                                    2))
+  
+  for (PLAYER in unique(df.GAME[df.GAME[["Game"]] == GAME, ][["Player"]])) {
+    
+    ### Kill points
+    df.GAME[df.GAME[["Game"]] == GAME & df.GAME[["Player"]] == PLAYER, ][["Kill.Points"]] <- nrow(df.GAME[df.GAME[["Game"]] == GAME &
+                                                                                                            df.GAME[["Murdered by"]] == PLAYER,])*5
+    
+    ### Game time
+    df.GAME[df.GAME[["Player"]] == PLAYER, "Game.Time.min"] <- ((as.numeric(word(gsub(":", " ", 
+                                                                                      df.GAME[df.GAME[["Player"]] == PLAYER, "Time"]),
+                                                                                 1))) -
+                                                                  GAME.START.HR) * 60 +
+      (as.numeric(word(gsub(":", " ",
+                            df.GAME[df.GAME[["Player"]] == PLAYER, "Time"]),
+                       2)) -
+         GAME.START.MIN)
+    
+  }
+}
+
+## Tidy up columns
+df.GAME[["Game"]] <- gsub("Game", "", df.GAME[["Game"]])
+df.GAME[["League.Points"]] <- as.numeric(df.GAME[["League.Points"]])
+df.GAME[["Kill.Points"]] <- as.numeric(df.GAME[["Kill.Points"]])
+df.GAME[["Game.Time.min"]] <- as.numeric(df.GAME[["Game.Time.min"]])
+df.GAME[["Total.Points"]] <- df.GAME[["League.Points"]] + df.GAME[["Kill.Points"]]
+
+# Annotate player names
+df.GAME[df.GAME[["Player"]] == "Dixon",][["Player"]] <- paste0(df.GAME[df.GAME[["Player"]] == "Dixon",][["Player"]],
+                                                               " 🐬")
+
+```
+
+```{r Overall.Stats, include=FALSE}
+# Add game number info to df
+
+# Create final dataframe
+COLNAMES <- c("Position", "Player", "Game", "Joker", "Kills", "Kills.Per.Game", "League.Points", "Total.Points", 
+              "Total.Game.Time.Min", "Average.Game.Time", "Winnings")
+
+df.FINAL <- data.frame(matrix(ncol = length(COLNAMES), nrow = 0))
+
+PLAYERS <- unique(df.GAME[["Player"]])
+
+## Has the player used their joker?
+JOKER <- data.frame(Player = PLAYERS,
+                    Joker = "")
+
+for (ROW in seq(1, nrow(df.GAME))) {
+  if (df.GAME[ROW, "Joker"] == "🃏") {
+    JOKER[JOKER[["Player"]] == df.GAME[ROW, "Player"],][["Joker"]] <- "🃏"
+  }
+}
+
+## How many kills, points?
+df.FINAL.inter <- data.frame(matrix(ncol = 5, nrow = 0))
+
+for (PLAYER in PLAYERS) {
+  
+  df.inter <- data.frame(
+    Player = PLAYER,
+    Game = as.numeric(length((df.GAME[df.GAME[["Player"]] == PLAYER, "Game"]))),
+    Kills = sum(df.GAME[df.GAME[["Player"]] == PLAYER, "Kill.Points"])/5,
+    Kills.Per.Game = mean(df.GAME[df.GAME[["Player"]] == PLAYER, "Kill.Points"]),
+    League.Points = sum(df.GAME[df.GAME[["Player"]] == PLAYER, "League.Points"]),
+    Total.Points = sum(df.GAME[df.GAME[["Player"]] == PLAYER, "Total.Points"]),
+    Total.Game.Time = sum(df.GAME[df.GAME[["Player"]] == PLAYER, "Game.Time.min"]),
+    Average.Game.Time = sum(df.GAME[df.GAME[["Player"]] == PLAYER, "Game.Time.min"]) / nrow(df.GAME[df.GAME[["Player"]] == PLAYER,]),
+    "Winnings" = sum(df.GAME[df.GAME[["Player"]] == PLAYER, "Winnings (£)"])
+  )
+  
+  df.FINAL.inter <- rbind(df.FINAL.inter,
+                          df.inter)
+  
+  rm(df.inter)
+  gc()
+  
+}
+
+## Combine into final data frame
+df.FINAL <- merge(JOKER, df.FINAL.inter)
+df.FINAL <- df.FINAL[order(df.FINAL[["Total.Points"]], decreasing = TRUE),]
+
+rm(df.FINAL.inter)
+
+## Calculate League Position
+df.FINAL[["Position"]] <- seq(1, nrow(df.FINAL))
+
+## Correct for joint placement
+for (ROW.N in seq(1, nrow(df.FINAL)-1)) {
+  if (df.FINAL[ROW.N, "Total.Points"] == df.FINAL[ROW.N+1, "Total.Points"]) {
+    df.FINAL[ROW.N+1, "Position"] <- df.FINAL[ROW.N, "Position"]
+  }
+}
+
+## Order all results to reflect final standings
+df.GAME.inter <- data.frame(matrix(nrow = 0, ncol = ncol(df.GAME)))
+colnames(df.GAME.inter) <- colnames(df.GAME)
+
+for (PLAYER in df.FINAL[["Player"]]) {
+  
+  df.GAME.inter <- rbind(df.GAME.inter,
+                         df.GAME[df.GAME[["Player"]] == PLAYER,])
+  
+}
+
+df.GAME <- df.GAME.inter
+rm(df.GAME.inter)
+gc()
+
+# Emoji annotations
+## The shark of the group!
+MAX <- max(df.FINAL[["Kills"]])
+df.FINAL[df.FINAL[["Kills"]] == MAX,][["Kills"]] <- paste0("🔪 ",
+                                                           df.FINAL[df.FINAL[["Kills"]] == MAX, "Kills"], 
+                                                           " 🦈")
+## The moneybags of the group
+MAX <- max(df.FINAL[["Winnings"]])
+df.FINAL[df.FINAL[["Winnings"]] == MAX,][["Winnings"]] <- paste0("💸 ", 
+                                                                 df.FINAL[df.FINAL[["Winnings"]] == MAX, "Winnings"], 
+                                                                 " 💰")
+
+```
+
+# League Standings
+## Titans highlighted
+
+```{r Main Table, echo=FALSE, message=FALSE, warning=FALSE}
+# Add a number of games column
+
+# Main table
+reactable(df.FINAL %>%
+            select(Position, Player, Game, Joker, Total.Points, Winnings, League.Points, Kills),
+          bordered = TRUE, highlight = TRUE, fullWidth = FALSE, resizable = TRUE, defaultPageSize = length(PLAYERS),
+          defaultColDef = colDef(vAlign = "center", headerVAlign = "center",
+                                 align = "center"),
+          columns = list(Game = colDef(name = "Games", aggregate = "max"),
+                         Joker = colDef(aggregate = "max"), 
+                         Total.Points = colDef(name = "Total Points", aggregate = "sum"),
+                         Winnings = colDef(name = "£", aggregate = "sum"),
+                         League.Points = colDef(name = "League Points", aggregate = "sum"),
+                         Kills = colDef(name = "Kills", aggregate = "sum")),
+          rowStyle = function(index) {
+            if (df.FINAL[index, "Position"] <= 7) {
+              list(background = "rgba(254, 121, 104, 0.8)")
+            }
+          },
+          rowClass = function(index) {
+            if (df.FINAL[index, "Position"] <= 8) {
+              "italic"
+            }
+          })
+```
+
+# Trends
+```{r Trend data, include=FALSE}
+
+# Calculate cumulative point tally
+COLNAMES <- c("Player", "Game", "Total.Points")
+df.POINT.TALLY <- data.frame(matrix(nrow = 0, ncol = length(COLNAMES)))
+colnames(df.POINT.TALLY) <- COLNAMES
+
+# Order by games for the cumulative dataframe build
+df.GAME.inter <- df.GAME[order(df.GAME[["Game"]], decreasing = FALSE),]
+
+for (PLAYER in PLAYERS) {
+  
+  # Create dataframe of gameweeks players have played
+  df.inter <- filter(df.GAME.inter, Player %in% PLAYER)
+  df.inter[["Running.Total"]] <- df.inter[1, "Total.Points"]
+  
+  if (nrow(df.inter) > 2) {
+    for (GAME.NO in seq(2, nrow(df.inter))) {
+      df.inter[GAME.NO, ][["Running.Total"]] <- df.inter[GAME.NO-1, ][["Running.Total"]] + df.inter[GAME.NO, ][["Total.Points"]] # More than two games
+    }
+  }else{
+    
+    if (nrow(df.inter) == 2) {
+      df.inter[2,][["Running.Total"]] <- df.inter[1, ][["Total.Points"]] + df.inter[2, ][["Total.Points"]] # only two games played
+    }
+    
+  }
+  
+  df.inter <- select(df.inter, Player, Game, Running.Total)
+  colnames(df.inter) <- COLNAMES
+  
+  MIN.GAME <- min(df.inter[["Game"]])
+  
+  df.inter <- rbind(data.frame(Player = PLAYER,
+                               Game = as.numeric(MIN.GAME)-1,
+                               Total.Points = 0),
+                    df.inter) # Add 0 game start to data
+  
+  #-------------------------------------------------------------------------------------------------
+  # Fill in missed game weeks between first and last game played - needs to be corrected----
+  #MAX.GAME <- max(as.numeric(df.inter[["Game"]]))
+  
+  #if (nrow(df.inter > 2)) {
+    
+    #df.inter <- merge(data.frame(Game = seq(MIN.GAME, MAX.GAME), Total.Points = NA), df.inter,
+    #                  by = "Game", all.x = TRUE, all.y = FALSE)
+    
+    #for (ROW.NO in seq(1, nrow(df.inter))) {
+      
+      #if (df.inter[is.na(df.inter[ROW.NO, ]),]) {
+       # df.inter[ROW.NO,][["Total.Points"]] <- df.inter[ROW.NO-1,][["Total.Points"]]
+      #}
+    #}
+  #}
+  #-----------------------------------------------------------------------------------------------
+  
+  # Add data to master dataset
+  df.POINT.TALLY <- rbind(df.POINT.TALLY, df.inter)
+}
+
+rm(COLNAMES, df.GAME.inter, df.inter)
+gc()
+
+df.POINT.TALLY[["Game"]] <- as.numeric(df.POINT.TALLY[["Game"]])
+TOTAL.POINTS.MAX <- round_any(max(df.POINT.TALLY[["Total.Points"]]) + 1, 20, f = ceiling)
+
+# Cumulative total points
+PLOT.PTS <- ggplot(df.POINT.TALLY, aes(x = Game, y = Total.Points, 
+                                       col = Player, label = Player)) +
+  geom_point() +
+  geom_label() +
+  geom_line(alpha = 0.4) +
+  transition_reveal(Game) + # range function tells the function what number of games to show. Adding an extra game makes it pause at the end as if there was another game there
+  labs(title = "Cumulative Total points",
+       x = "Game week", y = "Total Points") +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.line = element_line(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none") +
+  scale_x_continuous(limits = c(min(df.POINT.TALLY[["Game"]]),
+                                max(df.POINT.TALLY[["Game"]])),
+                     breaks = seq(min(df.POINT.TALLY[["Game"]]),
+                                  max(df.POINT.TALLY[["Game"]]),
+                                  1)) +
+  scale_y_continuous(limits = c(0, TOTAL.POINTS.MAX), 
+                     breaks = seq(0, TOTAL.POINTS.MAX, 20))
+
+# Distribution of league points
+PLOT.VLN.PTS <- ggplot(df.GAME, aes(x = Player, y = League.Points)) +
+  geom_violin(draw_quantiles = 0.5, fill = "blue") +
+  geom_point(fill = "black") +
+  labs(title = "League Points Per Game",
+       x = "", y = "League Points") +
+  theme_light() +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.line = element_line(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none",
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_y_continuous(limits = c(10, 200), breaks = seq(10, 200, 10))
+
+# Distribution of kill points
+MAX.KILLS.PTS <- max(df.GAME[["Kill.Points"]])
+PLOT.KILL.PTS <- ggplot(df.GAME, aes(x = Player, y = Kill.Points)) +
+  geom_violin(draw_quantiles = 0.5, fill = "red") +
+  geom_point(fill = "black") +
+  labs(title = "Kill Points Per Game",
+       x = "", y = "Kill points per game") +
+  theme_light() +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.line = element_line(color = "black"),
+        axis.ticks = element_line(color = "black"),
+        legend.position = "none",
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_y_continuous(limits = c(0, MAX.KILLS.PTS), breaks = seq(0, MAX.KILLS.PTS, 5))
+```
+
+
+```{r Trend graphs, echo=FALSE, message=FALSE, warning=FALSE}
+animate(PLOT.PTS, 
+        nframes = 100,      # Total length of animation
+        fps = 10,           # Frames per second
+        end_pause = 30,
+        renderer = gifski_renderer())
+
+ggarrange(PLOT.VLN.PTS, PLOT.KILL.PTS,
+          nrow = 1, ncol = 2)
+
+
+```
+
+# Breakdown of results
+```{r Previous Game Table, echo=FALSE, message=FALSE, warning=FALSE}
+# Add a number of games column
+
+# Results broken down by game
+reactable(df.GAME %>%
+            mutate(Avg.Game.Time.min = df.GAME[["Game.Time.min"]]) %>%
+            select(Player, Game, Joker, Total.Points, "Winnings (£)", League.Points, Kill.Points, Game.Time.min, Avg.Game.Time.min), 
+          groupBy = "Player",
+          bordered = TRUE, highlight = TRUE, searchable = TRUE, fullWidth = FALSE, resizable = TRUE, 
+          defaultPageSize = length(PLAYERS),
+          defaultColDef = colDef(vAlign = "center", headerVAlign = "center",
+                                 align = "center"),
+          columns = list(#Game = colDef(name = "Games", aggregate = "max", minWidth = 80),
+            Joker = colDef(aggregate = "max", minWidth = 75), 
+            Total.Points = colDef(name = "Total Points", aggregate = "sum", defaultSortOrder = "asc"),
+            "Winnings (£)" = colDef(name = "£", aggregate = "sum", minWidth = 60),
+            League.Points = colDef(name = "League Points", aggregate = "sum"),
+            Kill.Points = colDef(name = "Kill points", aggregate = "sum"),
+            Game.Time.min = colDef(name = "Time (min)", aggregate = "sum"),
+            Avg.Game.Time.min = colDef(name = "Avg. Time (min)", aggregate = "mean")),
+          rowStyle = function(index) {
+            if (df.GAME[index, "Joker"] == "🃏") {
+              list(background = "rgba(255, 0, 0, 0.2)")
+            }
+          },
+          rowClass = function(index) {
+            if (df.GAME[index, "Joker"] == "🃏") {
+              "italic"
+            }
+          }
+)
+```
+
+#
+# **Hall of fame**
+
+**Game 01 22/01/2026**
+
+![*Fred*](C:\Users\mdzbf\OneDrive - University of Bristol\Desktop\Poker 2025_2026\Images\Game01_Fred.jpg){width=250px}
+
+**Game 02 22/01/2026**
+
+![*Ian*](C:\Users\mdzbf\OneDrive - University of Bristol\Desktop\Poker 2025_2026\Images\Game02_Ian.jpeg){width=250px}
+
+```{r WillhelmScream, include=FALSE}
+ beep(2)
+```
